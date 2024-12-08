@@ -36,14 +36,14 @@ extension MainViewController {
             lastFoundIndex = sgv.foundIndex
             
             var offset = -50
-            if sgv.sgv < Double(topBG - 100) {
+            if sgv.sgv < Double(calculateMaxBgGraphValue() - 100) {
                 let bolusTime = findNearestBolusbyTime(timeWithin: 300, needle: dateTimeStamp, haystack: bolusData, startingIndex: lastFoundBolus)
                 lastFoundBolus = bolusTime.foundIndex
                 
                 offset = bolusTime.offset ? 70 : 20
             }
             
-            if dateTimeStamp < (dateTimeUtils.getNowTimeIntervalUTC() + (60 * 60)) {
+            if dateTimeStamp < (dateTimeUtils.getNowTimeIntervalUTC() + (3600 * UserDefaultsRepository.predictionToLoad.value)) {
                 // Make the dot
                 let dot = carbGraphStruct(value: Double(carbs), date: Double(dateTimeStamp), sgv: Int(sgv.sgv + Double(offset)), absorptionTime: absorptionTime)
                 carbData.append(dot)
@@ -88,7 +88,6 @@ extension MainViewController {
         }
         
         let resultString = String(format: "%.0f", totalCarbs)
-        tableData[10].value = resultString
-        infoTable.reloadData()
+        infoManager.updateInfoData(type: .carbsToday, value: resultString)
     }
 }

@@ -14,9 +14,8 @@ extension MainViewController {
         if UserDefaultsRepository.debugLog.value { self.writeDebugLog(value: "Download: Treatments") }
         if !UserDefaultsRepository.downloadTreatments.value { return }
         
-        let graphHours = 24 * UserDefaultsRepository.downloadDays.value
-        let startTimeString = dateTimeUtils.nowMinusNHoursTimeInterval(N: graphHours)
-        let currentTimeString = dateTimeUtils.getCurrentDateTimeString()
+        let startTimeString = dateTimeUtils.getDateTimeString(addingDays: -1 * UserDefaultsRepository.downloadDays.value)
+        let currentTimeString = dateTimeUtils.getDateTimeString(addingHours: 6)
         let parameters: [String: String] = [
             "find[created_at][$gte]": startTimeString,
             "find[created_at][$lte]": currentTimeString
@@ -42,53 +41,66 @@ extension MainViewController {
         
         var tempBasal: [[String:AnyObject]] = []
         var bolus: [[String:AnyObject]] = []
+        var smb: [[String:AnyObject]] = []
         var carbs: [[String:AnyObject]] = []
         var temporaryOverride: [[String:AnyObject]] = []
+        var temporaryTarget: [[String:AnyObject]] = []
         var note: [[String:AnyObject]] = []
         var bgCheck: [[String:AnyObject]] = []
         var suspendPump: [[String:AnyObject]] = []
         var resumePump: [[String:AnyObject]] = []
         var pumpSiteChange: [cageData] = []
         var cgmSensorStart: [sageData] = []
-        
-        for i in 0..<entries.count {
-            let entry = entries[i] as [String : AnyObject]?
-            switch entry?["eventType"] as! String {
+        var insulinCartridge: [iageData] = []
+
+        for entry in entries {
+            guard let eventType = entry["eventType"] as? String else {
+                continue
+            }
+            
+            switch eventType {
             case "Temp Basal":
-                tempBasal.append(entry!)
-            case "Correction Bolus":
-                bolus.append(entry!)
-            case "Bolus":
-                bolus.append(entry!)
+                tempBasal.append(entry)
+            case "Correction Bolus", "Bolus":
+                if let automatic = entry["automatic"] as? Bool, automatic {
+                    smb.append(entry)
+                } else {
+                    bolus.append(entry)
+                }
             case "SMB":
-                bolus.append(entry!)
+                smb.append(entry)
             case "Meal Bolus":
-                carbs.append(entry!)
-                bolus.append(entry!)
+                carbs.append(entry)
+                bolus.append(entry)
             case "Carb Correction":
-                carbs.append(entry!)
+                carbs.append(entry)
             case "Temporary Override":
-                temporaryOverride.append(entry!)
+                temporaryOverride.append(entry)
             case "Temporary Target":
-                temporaryOverride.append(entry!)
+                temporaryTarget.append(entry)
             case "Note":
-                note.append(entry!)
+                note.append(entry)
                 print("Note: \(String(describing: entry))")
             case "BG Check":
-                bgCheck.append(entry!)
+                bgCheck.append(entry)
             case "Suspend Pump":
-                suspendPump.append(entry!)
+                suspendPump.append(entry)
             case "Resume Pump":
-                resumePump.append(entry!)
+                resumePump.append(entry)
             case "Pump Site Change", "Site Change":
-                if let createdAt = entry?["created_at"] as? String {
+                if let createdAt = entry["created_at"] as? String {
                     let newEntry = cageData(created_at: createdAt)
                     pumpSiteChange.append(newEntry)
                 }
             case "Sensor Start":
-                if let createdAt = entry?["created_at"] as? String {
+                if let createdAt = entry["created_at"] as? String {
                     let newEntry = sageData(created_at: createdAt)
                     cgmSensorStart.append(newEntry)
+                }
+            case "Insulin Change":
+                if let createdAt = entry["created_at"] as? String {
+                    let newEntry = iageData(created_at: createdAt)
+                    insulinCartridge.append(newEntry)
                 }
             default:
                 print("No Match: \(String(describing: entry))")
@@ -98,7 +110,7 @@ extension MainViewController {
         if tempBasal.count > 0 {
             processNSBasals(entries: tempBasal)
         } else {
-            if basalData.count < 0 {
+            if basalData.count > 0 {
                 clearOldTempBasal()
             }
         }
@@ -107,6 +119,13 @@ extension MainViewController {
         } else {
             if bolusData.count > 0 {
                 clearOldBolus()
+            }
+        }
+        if smb.count > 0 {
+            processNSSmb(entries: smb)
+        } else {
+            if smbData.count > 0 {
+                clearOldSmb()
             }
         }
         updateTodaysCarbsFromEntries(entries: carbs)
@@ -124,12 +143,14 @@ extension MainViewController {
                 clearOldBGCheck()
             }
         }
+        if temporaryOverride.count == 0 && temporaryTarget.count == 0 && overrideGraphData.count > 0 {
+            clearOldOverride()
+        }
         if temporaryOverride.count > 0 {
             processNSOverrides(entries: temporaryOverride)
-        } else {
-            if overrideGraphData.count > 0 {
-                clearOldOverride()
-            }
+        }
+        if temporaryTarget.count > 0 {
+            processNSTemporaryTarget(entries: temporaryTarget)
         }
         if suspendPump.count > 0 {
             processSuspendPump(entries: suspendPump)
@@ -153,6 +174,9 @@ extension MainViewController {
                 clearOldSensor()
             }
         }
+
+        processIage(entries: insulinCartridge)
+
         if note.count > 0 {
             processNotes(entries: note)
         } else {
